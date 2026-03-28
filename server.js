@@ -1,10 +1,11 @@
 import dotenv from "dotenv";
+import dns from "dns";
+dns.setServers(["1.1.1.1" ,"8.8.8.8"]);
 dotenv.config();
 
 import app from "./src/app.js"
 import connectDB from "./src/config/db.js";
-import authRoutes from "./src/routes/auth.routes.js";
-import errorMiddleware from "./src/middleware/error.middleware.js";
+
 
 
 connectDB();

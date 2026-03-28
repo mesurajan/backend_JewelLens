@@ -76,3 +76,4 @@ export const oauthLogin = asyncHandler(async (req, res) => {
 
   new ApiResponse(res, 200, `Logged in via ${provider}`, { user, token }).send();
 });
+

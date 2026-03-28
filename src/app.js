@@ -19,7 +19,7 @@ app.get("/api/health",(req,res)=>{
 app.use("/api/auth", authRoutes);
 
 
-// Catch all errors
+// Catch all errors=
 app.use(errorMiddleware);
 export default app;
 
