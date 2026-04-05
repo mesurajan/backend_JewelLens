@@ -7,6 +7,8 @@ import ApiError from "../utils/ApiError.js";
 const errorMiddleware = (err, req, res, next) => {
   console.error(err); // Log full error for dev
 
+  const isDev = process.env.NODE_ENV === "development";
+
   if (err instanceof ApiError) {
     return res.status(err.statusCode).json({
       status: err.statusCode,

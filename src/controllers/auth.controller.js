@@ -77,3 +77,49 @@ export const oauthLogin = asyncHandler(async (req, res) => {
   new ApiResponse(res, 200, `Logged in via ${provider}`, { user, token }).send();
 });
 
+export const createAdmin = asyncHandler(async (req, res) => {
+  const { name, email, password } = req.body;
+
+  const { name: validName, email: validEmail, password: validPassword } =
+    registerSchema.parse({ name, email, password });
+
+  const existingUser = await User.findOne({ email: validEmail });
+  if (existingUser) throw new ApiError(409, "Email already registered");
+
+  const hashedPassword = await bcrypt.hash(validPassword, 10);
+
+  const admin = await User.create({
+    name: validName,
+    email: validEmail,
+    password: hashedPassword,
+    role: "admin", // force admin
+  });
+
+  new ApiResponse(res, 201, "Admin created successfully", admin).send();
+});
+
+export const deleteAdmin = asyncHandler(async (req, res) => {
+  const admin = await User.findById(req.params.id);
+  if (!admin) throw new ApiError(404, "Admin not found");
+
+  if (admin.role !== "admin") throw new ApiError(400, "Not an admin");
+
+  await admin.deleteOne();
+  new ApiResponse(res, 200, "Admin deleted successfully").send();
+});
+
+// UPDATE Admin by ID
+export const updateAdmin = asyncHandler(async (req, res) => {
+  const admin = await User.findById(req.params.id);
+  if (!admin) throw new ApiError(404, "Admin not found");
+
+  if (admin.role !== "admin") throw new ApiError(400, "Not an admin");
+
+  const { name, email, password } = req.body;
+  if (name) admin.name = name;
+  if (email) admin.email = email;
+  if (password) admin.password = await bcrypt.hash(password, 10);
+
+  await admin.save();
+  new ApiResponse(res, 200, "Admin updated successfully", admin).send();
+});
