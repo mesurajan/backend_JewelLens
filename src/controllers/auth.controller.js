@@ -29,7 +29,7 @@ export const registerUser = asyncHandler(async (req, res) => {
   });
 
   const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
+    expiresIn: "1d",
   });
 
   new ApiResponse(res, 201, "Account created successfully", { user, token }).send();
