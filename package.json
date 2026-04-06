@@ -21,6 +21,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.1.0",
     "mongoose": "^9.2.4",
+    "slugify": "^1.6.9",
     "zod": "^4.3.6"
   },
   "devDependencies": {

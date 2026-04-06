@@ -4,6 +4,8 @@ import errorMiddleware from "./middleware/error.middleware.js";
 import authRoutes from "./routes/auth.routes.js";
 import requestLogger from "./middleware/logger.middleware.js";
 import userRoutes from "./routes/user.routes.js";
+import categoryRoutes from "./routes/category.routes.js";
+
 
 const app = express();
 
@@ -33,6 +35,7 @@ app.get("/api/health", (req, res) => {
 // ----------------- Routes -----------------
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/categories", categoryRoutes);
 
 // ----------------- Error handler -----------------
 app.use(errorMiddleware);

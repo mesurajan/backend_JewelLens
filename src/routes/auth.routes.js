@@ -10,4 +10,5 @@ router.post("/oauth", oauthLogin);         // /oauth (google/facebook)
 router.post("/createadmin", protect, adminOnly, createAdmin);
 router.put("/updateadmin/:id", protect, adminOnly, updateAdmin);
 router.delete("/deleteadmin/:id", protect, adminOnly, deleteAdmin);
+
 export default router;
