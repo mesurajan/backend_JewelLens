@@ -10,10 +10,12 @@ dotenv.config();
 
 //node src/seeders/admin.seeder.js
 // Read admin credentials from .env
-const ADMIN_NAME = process.env.SEED_ADMIN_NAME ;
+const ADMIN_NAME = process.env.SEED_ADMIN_NAME;
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
-const ADMIN_ROLE = process.env.SEED_ADMIN_ROLE ;
+const ADMIN_ROLE = process.env.SEED_ADMIN_ROLE;
+const ADMIN_PHONE = process.env.SEED_ADMIN_PHONE || "";
+const ADMIN_ADDRESS = process.env.SEED_ADMIN_ADDRESS || "";
 
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
   console.error(
@@ -35,8 +37,10 @@ const seedAdmin = async () => {
       existingAdmin.password = await bcrypt.hash(ADMIN_PASSWORD, 10);
       existingAdmin.name = ADMIN_NAME; // optional: update name if changed
       existingAdmin.role = ADMIN_ROLE; // optional: update role if changed
+      existingAdmin.phone = ADMIN_PHONE;
+      existingAdmin.address = ADMIN_ADDRESS;
       await existingAdmin.save();
-      console.log("Admin password (and info) updated successfully.");
+      console.log("Admin password and admin contact info updated successfully.");
       process.exit();
     }
 
@@ -47,6 +51,8 @@ const seedAdmin = async () => {
       email: ADMIN_EMAIL,
       password: hashedPassword,
       role: ADMIN_ROLE,
+      phone: ADMIN_PHONE,
+      address: ADMIN_ADDRESS,
     });
 
     console.log("Admin created successfully:");

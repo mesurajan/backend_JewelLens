@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js"
 import ApiError from "../utils/ApiError.js";
@@ -6,16 +7,95 @@ import ApiResponse from "../utils/ApiResponse.js";
 import { registerSchema, loginSchema } from "../validations/auth.validation.js";
 import asyncHandler from "../middleware/async.middleware.js";
 
+const createToken = (user, expiresIn = "7d") =>
+  jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+    expiresIn,
+  });
+
+const getGoogleUser = async (idToken) => {
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    throw new ApiError(500, "Google OAuth is not configured");
+  }
+
+  const response = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
+  );
+
+  if (!response.ok) {
+    throw new ApiError(401, "Invalid Google token");
+  }
+
+  const data = await response.json();
+
+  if (data.aud !== process.env.GOOGLE_CLIENT_ID) {
+    throw new ApiError(401, "Google token audience mismatch");
+  }
+
+  if (!data.email) {
+    throw new ApiError(401, "Google account email is required");
+  }
+
+  return {
+    email: data.email,
+    name: data.name || data.email.split("@")[0],
+    providerId: data.sub,
+  };
+};
+
+const getFacebookUser = async (accessToken) => {
+  const appId = process.env.FACEBOOK_APP_ID;
+  const appSecret = process.env.FACEBOOK_APP_SECRET;
+
+  if (!appId || !appSecret) {
+    throw new ApiError(500, "Facebook OAuth is not configured");
+  }
+
+  const debugResponse = await fetch(
+    `https://graph.facebook.com/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${encodeURIComponent(
+      `${appId}|${appSecret}`
+    )}`
+  );
+
+  if (!debugResponse.ok) {
+    throw new ApiError(401, "Invalid Facebook token");
+  }
+
+  const debugData = await debugResponse.json();
+
+  if (!debugData.data?.is_valid || debugData.data.app_id !== appId) {
+    throw new ApiError(401, "Invalid Facebook token");
+  }
+
+  const userResponse = await fetch(
+    `https://graph.facebook.com/me?fields=id,name,email&access_token=${encodeURIComponent(accessToken)}`
+  );
+
+  if (!userResponse.ok) {
+    throw new ApiError(401, "Unable to fetch Facebook profile");
+  }
+
+  const userData = await userResponse.json();
+
+  if (!userData.email) {
+    throw new ApiError(401, "Facebook account email is required");
+  }
+
+  return {
+    email: userData.email,
+    name: userData.name || userData.id,
+    providerId: userData.id,
+  };
+};
 
 export const registerUser = asyncHandler(async (req, res) => {
-  const { name, email, password, confirmPassword, terms } = req.body;
+  const { name, email, password, confirmPassword, terms, phone = "", address = "" } = req.body;
 
   if (!terms) throw new ApiError(400, "Accept terms & conditions");
   if (password !== confirmPassword)
     throw new ApiError(400, "Passwords do not match");
 
-  const { name: validName, email: validEmail, password: validPassword } =
-    registerSchema.parse({ name, email, password });
+  const { name: validName, email: validEmail, password: validPassword, phone: validPhone, address: validAddress } =
+    registerSchema.parse({ name, email, password, phone, address });
 
   const existingUser = await User.findOne({ email: validEmail });
   if (existingUser) throw new ApiError(409, "Email already registered");
@@ -26,6 +106,8 @@ export const registerUser = asyncHandler(async (req, res) => {
     name: validName,
     email: validEmail,
     password: hashedPassword,
+    phone: validPhone,
+    address: validAddress,
   });
 
   const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
@@ -62,19 +144,45 @@ export const loginUser = asyncHandler(async (req, res) => {
  * For frontend testing, can just return success
  */
 export const oauthLogin = asyncHandler(async (req, res) => {
-  // In real, integrate Google/Facebook SDK, create/find user, return token
-  const { provider, email, name } = req.body;
+  const { provider, token } = req.body;
 
-  let user = await User.findOne({ email });
-  if (!user) {
-    user = await User.create({ name, email, password: "oauth_dummy" });
+  if (!provider || !token) {
+    throw new ApiError(400, "OAuth provider and token are required");
   }
 
-  const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+  let profile;
 
-  new ApiResponse(res, 200, `Logged in via ${provider}`, { user, token }).send();
+  if (provider === "google") {
+    profile = await getGoogleUser(token);
+  } else if (provider === "facebook") {
+    profile = await getFacebookUser(token);
+  } else {
+    throw new ApiError(400, "Unsupported OAuth provider");
+  }
+
+  const { email, name, providerId } = profile;
+
+  let user = await User.findOne({ email });
+
+  if (!user) {
+    const password = await bcrypt.hash(crypto.randomBytes(16).toString("hex"), 10);
+    user = await User.create({
+      name,
+      email,
+      password,
+      provider,
+      providerId,
+    });
+  } else {
+    if (user.provider === "local") {
+      user.provider = provider;
+      user.providerId = providerId;
+      await user.save();
+    }
+  }
+
+  const authToken = createToken(user, "7d");
+  new ApiResponse(res, 200, `Logged in via ${provider}`, { user, token: authToken }).send();
 });
 
 export const createAdmin = asyncHandler(async (req, res) => {
