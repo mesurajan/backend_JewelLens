@@ -15,7 +15,7 @@ const categorySchema = new mongoose.Schema(
     },
     icon: {
       type: String,
-      default: "📦",
+      default: " ",
     },
     status: {
       type: String,
