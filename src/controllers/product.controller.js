@@ -103,3 +103,22 @@ export const deleteProduct = asyncHandler(async (req, res) => {
   await product.deleteOne();
   new ApiResponse(res, 200, "Product deleted").send();
 });
+
+export const getRelatedProducts = asyncHandler(async (req, res) => {
+  const { slug } = req.params;
+
+  const currentProduct = await Product.findOne({ slug });
+
+  if (!currentProduct) {
+    throw new ApiError(404, "Product not found");
+  }
+
+  const related = await Product.find({
+    category: currentProduct.category,
+    _id: { $ne: currentProduct._id },
+  })
+    .limit(4)
+    .lean();
+
+  new ApiResponse(res, 200, "Related products fetched", related).send();
+});
