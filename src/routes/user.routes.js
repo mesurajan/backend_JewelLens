@@ -2,12 +2,24 @@ import express from "express";
 import {
   getUsers,
   getUserById,
+  getCurrentUser,
+  getMyCart,
+  updateMyCart,
+  getMyWishlist,
+  updateMyWishlist,
   updateUser,
   deleteUser,
 } from "../controllers/user.controller.js";
 import { protect, adminOnly } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
+
+// Current user routes
+router.get("/me", protect, getCurrentUser);
+router.get("/me/cart", protect, getMyCart);
+router.put("/me/cart", protect, updateMyCart);
+router.get("/me/wishlist", protect, getMyWishlist);
+router.put("/me/wishlist", protect, updateMyWishlist);
 
 // Admin routes
 router.get("/", protect, adminOnly, getUsers); // GET all users
