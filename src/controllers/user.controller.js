@@ -50,6 +50,16 @@ const deriveLegacyAddress = (addresses = [], fallbackAddress = "") => {
   return defaultAddress || addresses[0]?.address || fallbackAddress.trim() || "";
 };
 
+const sanitizeShippingProfile = (shippingProfile = {}) => ({
+  province: String(shippingProfile?.province || "").trim(),
+  district: String(shippingProfile?.district || "").trim(),
+  city: String(shippingProfile?.city || "").trim(),
+  wardNo: String(shippingProfile?.wardNo || "").trim(),
+  streetAddress: String(shippingProfile?.streetAddress || "").trim(),
+  houseNo: String(shippingProfile?.houseNo || "").trim(),
+  landmark: String(shippingProfile?.landmark || "").trim(),
+});
+
 // Get all users (admin only)
 export const getUsers = asyncHandler(async (req, res) => {
   const users = await User.find().select("-password"); // hide passwords
@@ -124,7 +134,7 @@ export const updateMyWishlist = asyncHandler(async (req, res) => {
 });
 
 export const updateCurrentUser = asyncHandler(async (req, res) => {
-  const { name, phone = "", addresses = [], address = "" } = req.body;
+  const { name, phone = "", addresses = [], address = "", shippingProfile = {} } = req.body;
 
   if (!String(name || "").trim()) {
     throw new ApiError(400, "Name is required");
@@ -134,11 +144,13 @@ export const updateCurrentUser = asyncHandler(async (req, res) => {
   if (!user) throw new ApiError(404, "User not found");
 
   const nextAddresses = sanitizeAddresses(addresses, address || user.address || "");
+  const nextShippingProfile = sanitizeShippingProfile(shippingProfile);
 
   user.name = String(name).trim();
   user.phone = String(phone).trim();
   user.addresses = nextAddresses;
   user.address = deriveLegacyAddress(nextAddresses, address || user.address || "");
+  user.shippingProfile = nextShippingProfile;
 
   await user.save();
 
@@ -205,13 +217,17 @@ export const deleteMyAccount = asyncHandler(async (req, res) => {
 
 // Update user (admin can update anyone; user can update self)
 export const updateUser = asyncHandler(async (req, res) => {
-  const { name, email, password, phone, address, addresses, avatar, lastLogin } = req.body;
+  const { name, email, password, phone, address, addresses, avatar, lastLogin, shippingProfile } = req.body;
   const user = await User.findById(req.params.id);
   if (!user) throw new ApiError(404, "User not found");
 
   // Authorization check
   if (req.user.role !== "admin" && req.user.id !== user._id.toString())
     throw new ApiError(403, "Not authorized");
+
+  if (req.user.role === "admin" && user.role !== "admin") {
+    throw new ApiError(403, "Admin can only edit other admin accounts from this route");
+  }
 
   if (name) user.name = name;
   if (email) user.email = email;
@@ -225,6 +241,9 @@ export const updateUser = asyncHandler(async (req, res) => {
     user.address = deriveLegacyAddress(nextAddresses, typeof address === "string" ? address : user.address);
   } else if (typeof address === "string") {
     user.address = address.trim();
+  }
+  if (shippingProfile && typeof shippingProfile === "object") {
+    user.shippingProfile = sanitizeShippingProfile(shippingProfile);
   }
 
   await user.save();

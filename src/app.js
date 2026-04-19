@@ -10,6 +10,8 @@ import heroSliderRoutes from "./routes/heroSlider.routes.js";
 import brandPartnerRoutes from "./routes/brandPartner.routes.js";
 import instagramPostRoutes from "./routes/instagramPost.routes.js";
 import occasionRoutes from "./routes/occasion.routes.js";
+import orderRoutes from "./routes/order.routes.js";
+import footerSettingRoutes from "./routes/footerSetting.routes.js";
 
 const app = express();
 
@@ -45,6 +47,8 @@ app.use("/api/hero-sliders", heroSliderRoutes);
 app.use("/api/brand-partners", brandPartnerRoutes);
 app.use("/api/instagram-posts", instagramPostRoutes);
 app.use("/api/occasions", occasionRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/footer-settings", footerSettingRoutes);
 
 // ----------------- Error handler -----------------
 app.use(errorMiddleware);
