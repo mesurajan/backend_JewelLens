@@ -108,6 +108,15 @@ export const registerUser = asyncHandler(async (req, res) => {
     password: hashedPassword,
     phone: validPhone,
     address: validAddress,
+    addresses: validAddress
+      ? [
+          {
+            label: "Primary",
+            address: validAddress,
+            isDefault: true,
+          },
+        ]
+      : [],
   });
 
   const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
@@ -131,6 +140,9 @@ export const loginUser = asyncHandler(async (req, res) => {
 
   const isMatch = await bcrypt.compare(validPassword, user.password);
   if (!isMatch) throw new ApiError(401, "Invalid email or password");
+
+  user.lastLogin = new Date();
+  await user.save();
 
   const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
     expiresIn: remember ? "30d" : "7d",
@@ -172,13 +184,16 @@ export const oauthLogin = asyncHandler(async (req, res) => {
       password,
       provider,
       providerId,
+      lastLogin: new Date(),
     });
   } else {
     if (user.provider === "local") {
       user.provider = provider;
       user.providerId = providerId;
-      await user.save();
     }
+
+    user.lastLogin = new Date();
+    await user.save();
   }
 
   const authToken = createToken(user, "7d");
@@ -186,10 +201,10 @@ export const oauthLogin = asyncHandler(async (req, res) => {
 });
 
 export const createAdmin = asyncHandler(async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, phone = "" } = req.body;
 
-  const { name: validName, email: validEmail, password: validPassword } =
-    registerSchema.parse({ name, email, password });
+  const { name: validName, email: validEmail, password: validPassword, phone: validPhone } =
+    registerSchema.parse({ name, email, password, phone });
 
   const existingUser = await User.findOne({ email: validEmail });
   if (existingUser) throw new ApiError(409, "Email already registered");
@@ -200,6 +215,7 @@ export const createAdmin = asyncHandler(async (req, res) => {
     name: validName,
     email: validEmail,
     password: hashedPassword,
+    phone: validPhone,
     role: "admin", // force admin
   });
 

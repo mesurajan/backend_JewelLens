@@ -16,6 +16,13 @@ const errorMiddleware = (err, req, res, next) => {
     });
   }
 
+  if (err?.name === "MulterError") {
+    return res.status(400).json({
+      status: 400,
+      message: err.message || "File upload failed",
+    });
+  }
+
   // Fallback for unhandled or programming errors
   return res.status(500).json({
     status: 500,
