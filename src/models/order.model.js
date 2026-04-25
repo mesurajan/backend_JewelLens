@@ -6,6 +6,20 @@ const orderItemSchema = new mongoose.Schema(
     productName: { type: String, required: true, trim: true },
     productSlug: { type: String, trim: true, default: "" },
     productImage: { type: String, default: "" },
+    selectedVariants: {
+      type: [
+        new mongoose.Schema(
+          {
+            type: { type: String, trim: true, required: true },
+            label: { type: String, trim: true, default: "" },
+            value: { type: String, trim: true, required: true },
+            priceAdjustment: { type: Number, required: true, min: 0, default: 0 },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     unitPrice: { type: Number, required: true, min: 0 },
     quantity: { type: Number, required: true, min: 1 },
     lineTotal: { type: Number, required: true, min: 0 },

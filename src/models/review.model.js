@@ -20,11 +20,23 @@ const reviewSchema = new mongoose.Schema(
       min: 1,
       max: 5,
     },
+    title: {
+      type: String,
+      trim: true,
+      maxlength: 160,
+      default: "",
+    },
     comment: {
       type: String,
       required: true,
       trim: true,
       maxlength: 2000,
+    },
+    status: {
+      type: String,
+      enum: ["published", "pending", "rejected"],
+      default: "published",
+      index: true,
     },
   },
   { timestamps: true }

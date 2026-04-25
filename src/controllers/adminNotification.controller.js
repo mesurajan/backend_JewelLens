@@ -1,4 +1,5 @@
 import Order from "../models/order.model.js";
+import Review from "../models/review.model.js";
 import User from "../models/user.model.js";
 import asyncHandler from "../middleware/async.middleware.js";
 import ApiResponse from "../utils/ApiResponse.js";
@@ -59,11 +60,29 @@ const serializeUserNotification = (user) => ({
   },
 });
 
+const serializeReviewNotification = (review) => ({
+  id: `review:${review._id.toString()}`,
+  type: "new_review",
+  entityId: review._id.toString(),
+  entityType: "review",
+  createdAt: review.createdAt,
+  title: "New review submitted",
+  message: `${review.userId?.name || "A customer"} reviewed ${review.productId?.name || "a product"}`,
+  href: "/admin/reviews",
+  meta: {
+    productName: review.productId?.name || "Product",
+    customerName: review.userId?.name || "Customer",
+    customerEmail: review.userId?.email || "",
+    rating: review.rating,
+    status: review.status || "published",
+  },
+});
+
 export const getAdminNotifications = asyncHandler(async (req, res) => {
   const limit = parseLimit(req.query.limit);
   const since = parseSince(req.query.since);
 
-  const [orders, users] = await Promise.all([
+  const [orders, users, reviews] = await Promise.all([
     Order.find(since ? { createdAt: { $gt: since } } : {})
       .populate("user", "name email")
       .sort({ createdAt: -1 })
@@ -75,9 +94,14 @@ export const getAdminNotifications = asyncHandler(async (req, res) => {
       .select("name email role createdAt")
       .sort({ createdAt: -1 })
       .limit(limit),
+    Review.find(since ? { createdAt: { $gt: since } } : {})
+      .populate("productId", "name")
+      .populate("userId", "name email")
+      .sort({ createdAt: -1 })
+      .limit(limit),
   ]);
 
-  const notifications = [...orders.map(serializeOrderNotification), ...users.map(serializeUserNotification)]
+  const notifications = [...orders.map(serializeOrderNotification), ...users.map(serializeUserNotification), ...reviews.map(serializeReviewNotification)]
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .slice(0, limit);
 
@@ -87,11 +111,13 @@ export const getAdminNotifications = asyncHandler(async (req, res) => {
         summary.orders += 1;
       } else if (notification.type === "new_user") {
         summary.users += 1;
+      } else if (notification.type === "new_review") {
+        summary.reviews += 1;
       }
 
       return summary;
     },
-    { orders: 0, users: 0 }
+    { orders: 0, users: 0, reviews: 0 }
   );
 
   new ApiResponse(res, 200, "Admin notifications retrieved successfully", {

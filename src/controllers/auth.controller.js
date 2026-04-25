@@ -2,15 +2,77 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js"
+import LoginAttempt from "../models/loginAttempt.model.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import { registerSchema, loginSchema } from "../validations/auth.validation.js";
 import asyncHandler from "../middleware/async.middleware.js";
 
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCK_WINDOW_MS = 30 * 60 * 1000;
+
 const createToken = (user, expiresIn = "7d") =>
   jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
     expiresIn,
   });
+
+const normalizeLoginEmail = (email) => String(email || "").trim().toLowerCase();
+
+const getLockoutMessage = (lockUntil) => {
+  const remainingMs = new Date(lockUntil).getTime() - Date.now();
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
+
+  return `Too many failed login attempts. Please wait ${remainingMinutes} minute(s) before trying again.`;
+};
+
+const registerFailedLoginAttempt = async (email) => {
+  const now = new Date();
+  const attempt = await LoginAttempt.findOne({ email });
+
+  if (!attempt) {
+    await LoginAttempt.create({
+      email,
+      failedAttempts: 1,
+      lastAttemptAt: now,
+    });
+
+    return {
+      locked: false,
+      message: `Invalid email or password. ${MAX_LOGIN_ATTEMPTS - 1} attempt(s) remaining before a 30-minute lock.`,
+    };
+  }
+
+  if (attempt.lockUntil && attempt.lockUntil.getTime() <= now.getTime()) {
+    attempt.failedAttempts = 0;
+    attempt.lockUntil = null;
+  }
+
+  attempt.failedAttempts += 1;
+  attempt.lastAttemptAt = now;
+
+  if (attempt.failedAttempts >= MAX_LOGIN_ATTEMPTS) {
+    attempt.failedAttempts = 0;
+    attempt.lockUntil = new Date(now.getTime() + LOGIN_LOCK_WINDOW_MS);
+    await attempt.save();
+
+    return {
+      locked: true,
+      message: "Too many failed login attempts. Your login is locked for 30 minutes.",
+    };
+  }
+
+  const attemptsRemaining = MAX_LOGIN_ATTEMPTS - attempt.failedAttempts;
+  await attempt.save();
+
+  return {
+    locked: false,
+    message: `Invalid email or password. ${attemptsRemaining} attempt(s) remaining before a 30-minute lock.`,
+  };
+};
+
+const clearFailedLoginAttempts = async (email) => {
+  await LoginAttempt.deleteOne({ email });
+};
 
 const getGoogleUser = async (idToken) => {
   if (!process.env.GOOGLE_CLIENT_ID) {
@@ -135,14 +197,28 @@ export const loginUser = asyncHandler(async (req, res) => {
   const { email: validEmail, password: validPassword } =
     loginSchema.parse({ email, password });
 
-  const user = await User.findOne({ email: validEmail });
-  if (!user) throw new ApiError(401, "Invalid email or password");
+  const normalizedEmail = normalizeLoginEmail(validEmail);
+  const existingAttempt = await LoginAttempt.findOne({ email: normalizedEmail });
+
+  if (existingAttempt?.lockUntil && existingAttempt.lockUntil.getTime() > Date.now()) {
+    throw new ApiError(429, getLockoutMessage(existingAttempt.lockUntil));
+  }
+
+  const user = await User.findOne({ email: normalizedEmail });
+  if (!user) {
+    const failedAttempt = await registerFailedLoginAttempt(normalizedEmail);
+    throw new ApiError(failedAttempt.locked ? 429 : 401, failedAttempt.message);
+  }
 
   const isMatch = await bcrypt.compare(validPassword, user.password);
-  if (!isMatch) throw new ApiError(401, "Invalid email or password");
+  if (!isMatch) {
+    const failedAttempt = await registerFailedLoginAttempt(normalizedEmail);
+    throw new ApiError(failedAttempt.locked ? 429 : 401, failedAttempt.message);
+  }
 
   user.lastLogin = new Date();
   await user.save();
+  await clearFailedLoginAttempts(normalizedEmail);
 
   const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
     expiresIn: remember ? "30d" : "7d",

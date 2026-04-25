@@ -32,7 +32,9 @@ const serializeReview = (review, currentUserId) => {
     userId,
     userName: review.userId?.name || "Customer",
     rating: review.rating,
+    title: review.title || "",
     comment: review.comment,
+    status: review.status || "published",
     createdAt: review.createdAt,
     updatedAt: review.updatedAt,
     verified: false,
@@ -40,11 +42,31 @@ const serializeReview = (review, currentUserId) => {
   };
 };
 
+const serializeAdminReview = (review) => ({
+  id: review._id.toString(),
+  productId: review.productId?._id?.toString?.() ?? review.productId?.toString?.() ?? "",
+  productName: review.productId?.name || "Unknown Product",
+  customerName: review.userId?.name || "Customer",
+  customerEmail: review.userId?.email || "",
+  rating: review.rating,
+  title: review.title || String(review.comment || "").trim().slice(0, 60) || "Review",
+  comment: review.comment,
+  status: review.status || "published",
+  date: review.createdAt,
+  createdAt: review.createdAt,
+  updatedAt: review.updatedAt,
+});
+
+const getPublishedReviewFilter = () => ({
+  $or: [{ status: "published" }, { status: { $exists: false } }, { status: null }],
+});
+
 const recalculateProductReviewStats = async (productId) => {
   const [stats] = await Review.aggregate([
     {
       $match: {
         productId: new mongoose.Types.ObjectId(productId),
+        ...getPublishedReviewFilter(),
       },
     },
     {
@@ -70,40 +92,37 @@ const recalculateProductReviewStats = async (productId) => {
 export const getReviewsByProduct = asyncHandler(async (req, res) => {
   const product = await resolveProduct(req.params.productId);
 
-  const reviews = await Review.find({ productId: product._id })
+  const reviewQuery = { productId: product._id };
+  if (req.user?.role !== "admin") {
+    Object.assign(reviewQuery, getPublishedReviewFilter());
+  }
+
+  const reviews = await Review.find(reviewQuery)
     .populate("userId", "name")
     .sort({ createdAt: -1 });
+
+  const currentUserId = req.user?._id?.toString?.() ?? req.user?.id ?? "";
+
+  const currentUserReview = currentUserId
+    ? await Review.findOne({ productId: product._id, userId: currentUserId }).populate("userId", "name")
+    : null;
 
   const avgRating =
     reviews.length > 0
       ? Number((reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1))
       : 0;
 
-  const currentUserId = req.user?._id?.toString?.() ?? req.user?.id ?? "";
-
   new ApiResponse(res, 200, "Reviews fetched successfully", {
     productId: product._id.toString(),
     avgRating,
     totalReviews: reviews.length,
-    currentUserReview:
-      reviews.find((review) => {
-        const reviewUserId = review.userId?._id?.toString?.() ?? review.userId?.toString?.() ?? "";
-        return currentUserId && reviewUserId === currentUserId;
-      })
-        ? serializeReview(
-            reviews.find((review) => {
-              const reviewUserId = review.userId?._id?.toString?.() ?? review.userId?.toString?.() ?? "";
-              return currentUserId && reviewUserId === currentUserId;
-            }),
-            currentUserId
-          )
-        : null,
+    currentUserReview: currentUserReview ? serializeReview(currentUserReview, currentUserId) : null,
     reviews: reviews.map((review) => serializeReview(review, currentUserId)),
   }).send();
 });
 
 export const upsertReview = asyncHandler(async (req, res) => {
-  const { productId, rating, comment } = req.body;
+  const { productId, rating, comment, title } = req.body;
   const product = await resolveProduct(productId);
 
   const parsedRating = Number(rating);
@@ -116,12 +135,16 @@ export const upsertReview = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Comment is required");
   }
 
+  const normalizedTitle = String(title || "").trim();
+
   const review = await Review.findOneAndUpdate(
     { productId: product._id, userId: req.user._id },
     {
       $set: {
         rating: parsedRating,
+        title: normalizedTitle,
         comment: normalizedComment,
+        status: "published",
       },
     },
     {
@@ -159,4 +182,43 @@ export const deleteReview = asyncHandler(async (req, res) => {
   const stats = await recalculateProductReviewStats(productId);
 
   new ApiResponse(res, 200, "Review deleted successfully", stats).send();
+});
+
+export const getAdminReviews = asyncHandler(async (_req, res) => {
+  const reviews = await Review.find({})
+    .populate("productId", "name")
+    .populate("userId", "name email")
+    .sort({ createdAt: -1 });
+
+  new ApiResponse(res, 200, "Admin reviews fetched successfully", {
+    reviews: reviews.map(serializeAdminReview),
+  }).send();
+});
+
+export const updateReviewStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body;
+
+  if (!["published", "pending", "rejected"].includes(String(status))) {
+    throw new ApiError(400, "Invalid review status");
+  }
+
+  const review = await Review.findByIdAndUpdate(
+    req.params.id,
+    { $set: { status } },
+    { new: true, runValidators: true }
+  )
+    .populate("productId", "name")
+    .populate("userId", "name email");
+
+  if (!review) {
+    throw new ApiError(404, "Review not found");
+  }
+
+  const stats = await recalculateProductReviewStats(review.productId._id || review.productId);
+
+  new ApiResponse(res, 200, "Review status updated successfully", {
+    review: serializeAdminReview(review),
+    avgRating: stats.avgRating,
+    totalReviews: stats.totalReviews,
+  }).send();
 });
