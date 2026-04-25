@@ -22,6 +22,23 @@ const shippingProfileSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const cartSelectionSchema = new mongoose.Schema(
+  {
+    type: { type: String, trim: true, required: true },
+    value: { type: String, trim: true, required: true },
+  },
+  { _id: false }
+);
+
+const cartItemSchema = new mongoose.Schema(
+  {
+    product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+    quantity: { type: Number, default: 1, min: 1 },
+    selectedVariants: { type: [cartSelectionSchema], default: [] },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -37,12 +54,7 @@ const userSchema = new mongoose.Schema(
     providerId: { type: String, trim: true },
     role: { type: String, enum: ["user", "admin"], default: "user" },
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: "product" }],
-    cart: [
-      {
-        product: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
-        quantity: { type: Number, default: 1 },
-      },
-    ],
+    cart: { type: [cartItemSchema], default: [] },
   },
   { timestamps: true }
 );

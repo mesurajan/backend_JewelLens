@@ -4,6 +4,19 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import bcrypt from "bcryptjs";
 
+const sanitizeVariantSelections = (selectedVariants = []) => {
+  if (!Array.isArray(selectedVariants)) {
+    return [];
+  }
+
+  return selectedVariants
+    .map((item) => ({
+      type: String(item?.type || "").trim(),
+      value: String(item?.value || "").trim(),
+    }))
+    .filter((item) => item.type && item.value);
+};
+
 const sanitizeAddresses = (addresses = [], fallbackAddress = "") => {
   if (!Array.isArray(addresses)) {
     return fallbackAddress
@@ -103,6 +116,7 @@ export const updateMyCart = asyncHandler(async (req, res) => {
   user.cart = cart.map((item) => ({
     product: item.product,
     quantity: typeof item.quantity === "number" && item.quantity > 0 ? item.quantity : 1,
+    selectedVariants: sanitizeVariantSelections(item.selectedVariants),
   }));
 
   await user.save();

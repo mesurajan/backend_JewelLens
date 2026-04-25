@@ -12,11 +12,11 @@ import {
 
 const router = express.Router();
 
-router.post("/", createProduct);
+router.post("/", protect, adminOnly, createProduct);
 router.get("/", getProducts);
 router.get("/:slug", getProductBySlug);
-router.put("/:id", updateProduct);
-router.delete("/:id", deleteProduct);
+router.put("/:id", protect, adminOnly, updateProduct);
+router.delete("/:id", protect, adminOnly, deleteProduct);
 router.get("/related/:slug", getRelatedProducts);
 
 export default router;

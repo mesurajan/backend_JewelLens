@@ -28,6 +28,46 @@ const normalizeShippingAddress = (payload = {}) => ({
   landmark: String(payload.landmark || "").trim(),
 });
 
+const normalizeSelectedVariants = (selectedVariants = []) => {
+  if (!Array.isArray(selectedVariants)) {
+    return [];
+  }
+
+  return selectedVariants
+    .map((variant) => ({
+      type: String(variant?.type || "").trim(),
+      value: String(variant?.value || "").trim(),
+    }))
+    .filter((variant) => variant.type && variant.value);
+};
+
+const resolveSelectedVariants = (product, selectedVariants = []) => {
+  const productVariants = Array.isArray(product.variants) ? product.variants : [];
+  const normalizedSelections = normalizeSelectedVariants(selectedVariants);
+
+  return normalizedSelections.map((selection) => {
+    const variant = productVariants.find((item) => item.type === selection.type);
+    if (!variant) {
+      throw new ApiError(400, `Invalid variant type selected for ${product.name}`);
+    }
+
+    const option = Array.isArray(variant.options)
+      ? variant.options.find((item) => item.value === selection.value)
+      : null;
+
+    if (!option) {
+      throw new ApiError(400, `Invalid ${variant.label || selection.type} selected for ${product.name}`);
+    }
+
+    return {
+      type: variant.type,
+      label: variant.label || variant.type,
+      value: option.value,
+      priceAdjustment: Number(option.priceAdjustment || 0),
+    };
+  });
+};
+
 const validateShippingAddress = (shippingAddress) => {
   const requiredFields = [
     ["fullName", "Full name"],
@@ -67,6 +107,7 @@ const serializeOrder = (orderDoc) => {
       name: item.productName,
       slug: item.productSlug,
       image: item.productImage,
+      selectedVariants: item.selectedVariants || [],
       quantity: item.quantity,
       price: item.unitPrice,
       lineTotal: item.lineTotal,
@@ -131,6 +172,7 @@ export const createOrder = asyncHandler(async (req, res) => {
   const normalizedItems = items.map((item) => {
     const productId = String(item?.productId || item?.product || "").trim();
     const quantity = Number(item?.quantity);
+    const selectedVariants = normalizeSelectedVariants(item?.selectedVariants);
 
     if (!productId) {
       throw new ApiError(400, "Each order item must include a product");
@@ -140,7 +182,7 @@ export const createOrder = asyncHandler(async (req, res) => {
       throw new ApiError(400, "Each order item must have a valid quantity");
     }
 
-    return { productId, quantity };
+    return { productId, quantity, selectedVariants };
   });
 
   const uniqueProductIds = [...new Set(normalizedItems.map((item) => item.productId))];
@@ -164,7 +206,13 @@ export const createOrder = asyncHandler(async (req, res) => {
       throw new ApiError(400, `${product.name} does not have enough stock available`);
     }
 
-    const lineTotal = product.price * item.quantity;
+    const resolvedSelectedVariants = resolveSelectedVariants(product, item.selectedVariants);
+    const variantAdjustment = resolvedSelectedVariants.reduce(
+      (sum, selection) => sum + selection.priceAdjustment,
+      0
+    );
+    const unitPrice = product.price + variantAdjustment;
+    const lineTotal = unitPrice * item.quantity;
     subtotal += lineTotal;
 
     orderItems.push({
@@ -172,7 +220,8 @@ export const createOrder = asyncHandler(async (req, res) => {
       productName: product.name,
       productSlug: product.slug || "",
       productImage: product.images?.[0] || "",
-      unitPrice: product.price,
+      selectedVariants: resolvedSelectedVariants,
+      unitPrice,
       quantity: item.quantity,
       lineTotal,
     });

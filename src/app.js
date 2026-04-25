@@ -12,6 +12,8 @@ import instagramPostRoutes from "./routes/instagramPost.routes.js";
 import occasionRoutes from "./routes/occasion.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import footerSettingRoutes from "./routes/footerSetting.routes.js";
+import adminNotificationRoutes from "./routes/adminNotification.routes.js";
+import reviewRoutes from "./routes/review.routes.js";
 
 const app = express();
 
@@ -49,6 +51,8 @@ app.use("/api/instagram-posts", instagramPostRoutes);
 app.use("/api/occasions", occasionRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/footer-settings", footerSettingRoutes);
+app.use("/api/admin-notifications", adminNotificationRoutes);
+app.use("/api/reviews", reviewRoutes);
 
 // ----------------- Error handler -----------------
 app.use(errorMiddleware);
