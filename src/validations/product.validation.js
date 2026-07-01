@@ -20,6 +20,8 @@ export const productSchema = z.object({
   material: z.string().optional(),
   weight: z.string().optional(),
   images: z.array(z.string().url()).optional().default([]),
+  rating: z.number().min(0).optional(),
+  reviews: z.number().min(0).optional(),
   variants: z
     .array(
       z.object({
@@ -58,4 +60,6 @@ specifications: z
   offerBadge: z.string().optional(),
   offerEndsAt: z.string().optional(),
   featured: z.boolean().optional(),
+  frequentlyBoughtTogether: z.array(z.string()).optional().default([]),
+  completeLook: z.array(z.string()).optional().default([]),
 });

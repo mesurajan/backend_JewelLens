@@ -3,7 +3,26 @@ import { CloudinaryStorage } from "multer-storage-cloudinary";
 import cloudinary from "../config/cloudinary.js";
 import ApiError from "../utils/ApiError.js";
 
-const storage = new CloudinaryStorage({
+const createImageUploader = (folder, transformation) => {
+  const storage = new CloudinaryStorage({
+    cloudinary,
+    params: async () => ({
+      folder,
+      allowed_formats: ["jpg", "jpeg", "png", "webp"],
+      ...(transformation ? { transformation } : {}),
+    }),
+  });
+
+  return multer({
+    storage,
+    fileFilter,
+    limits: {
+      fileSize: 5 * 1024 * 1024,
+    },
+  });
+};
+
+const avatarStorage = new CloudinaryStorage({
   cloudinary,
   params: async () => ({
     folder: "JewelLens/avatar",
@@ -21,9 +40,12 @@ const fileFilter = (req, file, cb) => {
 };
 
 export const uploadAvatar = multer({
-  storage,
+  storage: avatarStorage,
   fileFilter,
   limits: {
     fileSize: 5 * 1024 * 1024,
   },
 });
+
+export const uploadProductImages = createImageUploader("JewelLens/products");
+export const uploadTryOnImage = createImageUploader("JewelLens/tryon/user-uploads");

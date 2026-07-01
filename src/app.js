@@ -14,6 +14,8 @@ import orderRoutes from "./routes/order.routes.js";
 import footerSettingRoutes from "./routes/footerSetting.routes.js";
 import adminNotificationRoutes from "./routes/adminNotification.routes.js";
 import reviewRoutes from "./routes/review.routes.js";
+import tryOnRoutes from "./routes/tryOn.routes.js";
+import settingsRoutes from "./routes/settings.routes.js";
 
 const app = express();
 
@@ -53,6 +55,8 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/footer-settings", footerSettingRoutes);
 app.use("/api/admin-notifications", adminNotificationRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/tryon", tryOnRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // ----------------- Error handler -----------------
 app.use(errorMiddleware);
