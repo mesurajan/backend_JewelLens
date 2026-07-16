@@ -31,6 +31,8 @@ const parseBooleanField = (value) => {
   return value === "true" || value === "1";
 };
 
+const escapeRegExp = (value = "") => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const normalizeProductPayload = (body, files = []) => {
   const uploadedImages = files.map((file) => file.path).filter(Boolean);
   const existingImages = parseJsonField(body.images, Array.isArray(body.images) ? body.images : []);
@@ -95,11 +97,55 @@ export const createProduct = asyncHandler(async (req, res) => {
 // GET ALL PRODUCTS
 // ---------------------------
 export const getProducts = asyncHandler(async (req, res) => {
-  const products = await Product.find()
-    .populate("category")
-    .sort({ createdAt: -1 });
+  const wantsPagination = ["page", "limit", "search", "category"].some(
+    (key) => req.query[key] !== undefined,
+  );
 
-  new ApiResponse(res, 200, "Products fetched", products).send();
+  if (!wantsPagination) {
+    const products = await Product.find().populate("category").sort({ createdAt: -1 });
+    return new ApiResponse(res, 200, "Products fetched", products).send();
+  }
+
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
+  const search = String(req.query.search || "").trim();
+  const category = String(req.query.category || "").trim();
+  const query = {};
+
+  if (search) {
+    const pattern = new RegExp(escapeRegExp(search), "i");
+    query.$or = [{ name: pattern }, { description: pattern }, { material: pattern }];
+  }
+
+  if (category && category !== "all") {
+    const categoryDocument = mongoose.isValidObjectId(category)
+      ? await Category.findById(category).select("_id")
+      : await Category.findOne({ name: new RegExp(`^${escapeRegExp(category)}$`, "i") }).select("_id");
+    query.category = categoryDocument?._id ?? null;
+  }
+
+  const [products, total] = await Promise.all([
+    Product.find(query)
+      .populate("category")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Product.countDocuments(query),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  new ApiResponse(res, 200, "Products fetched", {
+    items: products,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
+    },
+  }).send();
 });
 
 // ---------------------------

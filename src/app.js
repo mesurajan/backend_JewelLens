@@ -16,6 +16,7 @@ import adminNotificationRoutes from "./routes/adminNotification.routes.js";
 import reviewRoutes from "./routes/review.routes.js";
 import tryOnRoutes from "./routes/tryOn.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
+import popupAdRoutes from "./routes/popupAd.routes.js";
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use("/api/admin-notifications", adminNotificationRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/tryon", tryOnRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/popup-ads", popupAdRoutes);
 
 // ----------------- Error handler -----------------
 app.use(errorMiddleware);

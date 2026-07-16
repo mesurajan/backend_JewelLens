@@ -4,6 +4,8 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import bcrypt from "bcryptjs";
 
+const escapeRegExp = (value = "") => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const sanitizeVariantSelections = (selectedVariants = []) => {
   if (!Array.isArray(selectedVariants)) {
     return [];
@@ -75,8 +77,45 @@ const sanitizeShippingProfile = (shippingProfile = {}) => ({
 
 // Get all users (admin only)
 export const getUsers = asyncHandler(async (req, res) => {
-  const users = await User.find().select("-password"); // hide passwords
-  new ApiResponse(res, 200, "Users retrieved successfully", users).send();
+  const wantsPagination = ["page", "limit", "search"].some((key) => req.query[key] !== undefined);
+
+  if (!wantsPagination) {
+    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    return new ApiResponse(res, 200, "Users retrieved successfully", users).send();
+  }
+
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
+  const search = String(req.query.search || "").trim();
+  const query = {};
+
+  if (search) {
+    const pattern = new RegExp(escapeRegExp(search), "i");
+    query.$or = [{ name: pattern }, { email: pattern }, { role: pattern }, { provider: pattern }];
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(query)
+      .select("-password")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    User.countDocuments(query),
+  ]);
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  new ApiResponse(res, 200, "Users retrieved successfully", {
+    items: users,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
+    },
+  }).send();
 });
 
 // Get single user by ID (admin or self)
