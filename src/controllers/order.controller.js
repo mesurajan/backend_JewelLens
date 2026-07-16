@@ -1,9 +1,16 @@
 import Order from "../models/order.model.js";
 import Product from "../models/product.model.js";
 import User from "../models/user.model.js";
+import Settings from "../models/settings.model.js";
 import asyncHandler from "../middleware/async.middleware.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
+import {
+  buildEsewaPaymentRequest,
+  createEsewaTransactionUuid,
+  formatEsewaAmount,
+  getEsewaConfig,
+} from "../services/esewa.service.js";
 
 const ALLOWED_ORDER_STATUSES = ["processing", "shipped", "delivered", "cancelled"];
 const ALLOWED_PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"];
@@ -86,11 +93,12 @@ const validateShippingAddress = (shippingAddress) => {
   }
 };
 
-const serializeOrder = (orderDoc) => {
+export const serializeOrder = (orderDoc) => {
   const order = orderDoc.toObject ? orderDoc.toObject() : orderDoc;
   const createdAt = new Date(order.createdAt);
   const cancelWindowExpiresAt = new Date(createdAt.getTime() + USER_CANCELLATION_WINDOW_MS);
-  const canUserCancel = order.orderStatus === "processing" && cancelWindowExpiresAt.getTime() > Date.now();
+  const hasPendingEsewaPayment = order.paymentMethod === "esewa" && order.paymentStatus === "pending";
+  const canUserCancel = order.orderStatus === "processing" && !hasPendingEsewaPayment && cancelWindowExpiresAt.getTime() > Date.now();
 
   return {
     id: order._id?.toString?.() ?? order.id,
@@ -120,6 +128,20 @@ const serializeOrder = (orderDoc) => {
     total: order.pricing?.total ?? 0,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
+    paymentDetails: order.paymentDetails
+      ? {
+          provider: order.paymentDetails.provider,
+          transactionUuid: order.paymentDetails.transactionUuid,
+          expectedAmount: order.paymentDetails.expectedAmount || "",
+          productCode: order.paymentDetails.productCode || "",
+          transactionCode: order.paymentDetails.transactionCode || "",
+          referenceId: order.paymentDetails.referenceId || "",
+          providerStatus: order.paymentDetails.providerStatus || "PENDING",
+          initiatedAt: order.paymentDetails.initiatedAt,
+          verifiedAt: order.paymentDetails.verifiedAt,
+          attempts: order.paymentDetails.attempts || [],
+        }
+      : undefined,
     status: order.orderStatus,
     deliveryOption: order.deliveryOption,
     deliveryInstructions: order.deliveryInstructions || "",
@@ -132,7 +154,7 @@ const serializeOrder = (orderDoc) => {
   };
 };
 
-const restoreOrderStock = async (order) => {
+export const restoreOrderStock = async (order) => {
   const updates = order.items.map(async (item) => {
     const product = await Product.findById(item.product);
     if (!product) return;
@@ -152,14 +174,34 @@ export const createOrder = asyncHandler(async (req, res) => {
     deliveryOption = "standard",
     deliveryInstructions = "",
     notes = "",
+    checkoutAttemptId = "",
   } = req.body;
 
   if (!Array.isArray(items) || items.length === 0) {
     throw new ApiError(400, "At least one item is required to place an order");
   }
 
-  if (paymentMethod !== "cod") {
-    throw new ApiError(400, "This payment method is coming soon. Please use Cash on Delivery for now.");
+  if (!["cod", "esewa"].includes(paymentMethod)) {
+    throw new ApiError(400, "Only Cash on Delivery and eSewa are currently available");
+  }
+
+  const normalizedCheckoutAttemptId = String(checkoutAttemptId || "").trim();
+  if (paymentMethod === "esewa") {
+    if (!/^[A-Za-z0-9-]{12,100}$/.test(normalizedCheckoutAttemptId)) {
+      throw new ApiError(400, "A valid checkout attempt ID is required for eSewa");
+    }
+    const existingOrder = await Order.findOne({
+      user: req.user.id,
+      paymentMethod: "esewa",
+      checkoutAttemptId: normalizedCheckoutAttemptId,
+    });
+    if (existingOrder) {
+      const responseData = serializeOrder(existingOrder);
+      if (existingOrder.paymentStatus === "pending" && existingOrder.orderStatus === "processing") {
+        responseData.esewaPayment = buildEsewaPaymentRequest(existingOrder);
+      }
+      return new ApiResponse(res, 200, "Existing eSewa checkout attempt returned", responseData).send();
+    }
   }
 
   if (!["standard", "express"].includes(deliveryOption)) {
@@ -227,8 +269,11 @@ export const createOrder = asyncHandler(async (req, res) => {
     });
   }
 
-  const tax = Math.round(subtotal * 0.08);
-  const shippingFee = deliveryOption === "express" ? 250 : 0;
+  const checkoutSettings = await Settings.findOne().sort({ createdAt: 1 }).select("taxRate freeShippingThreshold");
+  const taxRate = Number(checkoutSettings?.taxRate ?? 8.5);
+  const freeShippingThreshold = Number(checkoutSettings?.freeShippingThreshold ?? 500);
+  const tax = Math.round(subtotal * (taxRate / 100));
+  const shippingFee = subtotal >= freeShippingThreshold ? 0 : deliveryOption === "express" ? 250 : 0;
   const total = subtotal + tax + shippingFee;
 
   for (const item of normalizedItems) {
@@ -238,35 +283,72 @@ export const createOrder = asyncHandler(async (req, res) => {
     await product.save();
   }
 
+  const isEsewa = paymentMethod === "esewa";
+  const esewaTransactionUuid = isEsewa ? createEsewaTransactionUuid() : "";
+  const esewaExpectedAmount = isEsewa ? formatEsewaAmount(total) : "";
+  const esewaProductCode = isEsewa ? getEsewaConfig().productCode : "";
   const order = await Order.create({
     orderNumber: generateOrderNumber(),
+    checkoutAttemptId: isEsewa ? normalizedCheckoutAttemptId : undefined,
     user: req.user.id,
     items: orderItems,
     shippingAddress,
     pricing: { subtotal, tax, shippingFee, total },
-    paymentMethod: "cod",
+    paymentMethod,
     paymentStatus: "pending",
+    paymentDetails: isEsewa
+      ? {
+          provider: "esewa",
+          transactionUuid: esewaTransactionUuid,
+          expectedAmount: esewaExpectedAmount,
+          productCode: esewaProductCode,
+          providerStatus: "PENDING",
+          initiatedAt: new Date(),
+          attempts: [{
+            transactionUuid: esewaTransactionUuid,
+            expectedAmount: esewaExpectedAmount,
+            productCode: esewaProductCode,
+            status: "initiated",
+            providerStatus: "PENDING",
+            initiatedAt: new Date(),
+          }],
+        }
+      : undefined,
     orderStatus: "processing",
     deliveryOption,
     deliveryInstructions: String(deliveryInstructions || "").trim(),
     statusHistory: [
       {
         status: "processing",
-        note: `Order placed with Cash on Delivery via ${deliveryOption} delivery`,
+        note: isEsewa
+          ? `Order created and awaiting verified eSewa payment via ${deliveryOption} delivery`
+          : `Order placed with Cash on Delivery via ${deliveryOption} delivery`,
       },
     ],
     notes: String(notes || "").trim(),
   });
 
-  await User.findByIdAndUpdate(req.user.id, {
-    $pull: {
-      cart: {
-        product: { $in: uniqueProductIds },
+  if (!isEsewa) {
+    await User.findByIdAndUpdate(req.user.id, {
+      $pull: {
+        cart: {
+          product: { $in: uniqueProductIds },
+        },
       },
-    },
-  });
+    });
+  }
 
-  new ApiResponse(res, 201, "Order placed successfully", serializeOrder(order)).send();
+  const responseData = serializeOrder(order);
+  if (isEsewa) {
+    responseData.esewaPayment = buildEsewaPaymentRequest(order);
+  }
+
+  new ApiResponse(
+    res,
+    201,
+    isEsewa ? "Order created. Continue to eSewa to complete payment." : "Order placed successfully",
+    responseData
+  ).send();
 });
 
 export const getMyOrders = asyncHandler(async (req, res) => {
@@ -286,6 +368,10 @@ export const cancelMyOrder = asyncHandler(async (req, res) => {
 
   if (order.orderStatus !== "processing") {
     throw new ApiError(400, "Only processing orders can be cancelled by the user");
+  }
+
+  if (order.paymentMethod === "esewa" && order.paymentStatus === "pending") {
+    throw new ApiError(400, "Check the eSewa payment status before cancelling this order");
   }
 
   const createdAt = new Date(order.createdAt).getTime();
@@ -364,10 +450,21 @@ export const updateAdminOrder = asyncHandler(async (req, res) => {
 
   const previousStatus = order.orderStatus;
   const { orderStatus, paymentStatus, shippingAddress, notes, deliveryOption, deliveryInstructions } = req.body;
+  const isUnpaidEsewaOrder = order.paymentMethod === "esewa" && order.paymentStatus !== "paid";
+
+  if (isUnpaidEsewaOrder && (shippingAddress !== undefined || deliveryOption !== undefined)) {
+    throw new ApiError(400, "Address and delivery charges cannot change after an eSewa payment is initiated");
+  }
 
   if (orderStatus !== undefined) {
     if (!ALLOWED_ORDER_STATUSES.includes(orderStatus)) {
       throw new ApiError(400, "Invalid order status");
+    }
+    if (order.paymentMethod === "esewa" && order.paymentStatus === "pending" && orderStatus === "cancelled") {
+      throw new ApiError(400, "Verify the pending eSewa payment before cancelling this order");
+    }
+    if (isUnpaidEsewaOrder && ["shipped", "delivered"].includes(orderStatus)) {
+      throw new ApiError(400, "Verify the eSewa payment before shipping this order");
     }
     order.orderStatus = orderStatus;
   }
@@ -375,6 +472,9 @@ export const updateAdminOrder = asyncHandler(async (req, res) => {
   if (paymentStatus !== undefined) {
     if (!ALLOWED_PAYMENT_STATUSES.includes(paymentStatus)) {
       throw new ApiError(400, "Invalid payment status");
+    }
+    if (order.paymentMethod === "esewa" && paymentStatus !== order.paymentStatus) {
+      throw new ApiError(400, "eSewa payment status can only be changed by provider verification");
     }
     order.paymentStatus = paymentStatus;
   }
@@ -429,6 +529,10 @@ export const deleteAdminOrder = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order) throw new ApiError(404, "Order not found");
 
+  if (order.paymentMethod === "esewa" && order.paymentStatus === "pending") {
+    throw new ApiError(400, "Verify the pending eSewa payment before deleting this order");
+  }
+
   if (order.orderStatus !== "cancelled") {
     await restoreOrderStock(order);
   }
@@ -446,8 +550,12 @@ export const getAdminOrderStats = asyncHandler(async (req, res) => {
 
   const allOrders = await Order.find();
 
+  const hasRecognizedRevenue = (order) =>
+    order.orderStatus !== "cancelled" &&
+    (order.paymentMethod === "cod" || order.paymentStatus === "paid");
+
   const totalRevenue = allOrders
-    .filter((order) => order.orderStatus !== "cancelled")
+    .filter(hasRecognizedRevenue)
     .reduce((sum, order) => sum + (order.pricing?.total || 0), 0);
 
   const statusCounts = {
@@ -467,7 +575,7 @@ export const getAdminOrderStats = asyncHandler(async (req, res) => {
       year: "2-digit",
     });
 
-    const nextRevenue = (monthlyRevenueMap.get(monthKey) || 0) + (order.orderStatus === "cancelled" ? 0 : order.pricing.total);
+    const nextRevenue = (monthlyRevenueMap.get(monthKey) || 0) + (hasRecognizedRevenue(order) ? order.pricing.total : 0);
     monthlyRevenueMap.set(monthKey, nextRevenue);
   }
 
@@ -531,7 +639,7 @@ export const getAdminOrderStats = asyncHandler(async (req, res) => {
 
   for (const order of allOrders) {
     const createdAt = new Date(order.createdAt);
-    const revenue = order.orderStatus === "cancelled" ? 0 : order.pricing.total;
+    const revenue = hasRecognizedRevenue(order) ? order.pricing.total : 0;
 
     for (const bucket of dayBuckets) {
       if (isSameHour(createdAt, new Date(bucket.key))) {

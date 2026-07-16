@@ -66,9 +66,46 @@ const statusHistorySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const paymentAttemptSchema = new mongoose.Schema(
+  {
+    transactionUuid: { type: String, required: true, trim: true },
+    expectedAmount: { type: String, required: true, trim: true },
+    productCode: { type: String, required: true, trim: true },
+    status: {
+      type: String,
+      enum: ["initiated", "pending", "completed", "failed", "canceled", "refunded", "verification_failed"],
+      default: "initiated",
+    },
+    providerStatus: { type: String, trim: true, default: "PENDING" },
+    transactionCode: { type: String, trim: true, default: "" },
+    referenceId: { type: String, trim: true, default: "" },
+    failureReason: { type: String, trim: true, default: "" },
+    initiatedAt: { type: Date, default: Date.now },
+    verifiedAt: { type: Date },
+  },
+  { _id: false }
+);
+
+const paymentDetailsSchema = new mongoose.Schema(
+  {
+    provider: { type: String, enum: ["esewa"], default: "esewa" },
+    transactionUuid: { type: String, trim: true, default: "" },
+    expectedAmount: { type: String, trim: true, default: "" },
+    productCode: { type: String, trim: true, default: "" },
+    transactionCode: { type: String, trim: true, default: "" },
+    referenceId: { type: String, trim: true, default: "" },
+    providerStatus: { type: String, trim: true, default: "PENDING" },
+    initiatedAt: { type: Date },
+    verifiedAt: { type: Date },
+    attempts: { type: [paymentAttemptSchema], default: [] },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     orderNumber: { type: String, required: true, unique: true, index: true },
+    checkoutAttemptId: { type: String, trim: true, unique: true, sparse: true },
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     items: { type: [orderItemSchema], default: [] },
     shippingAddress: { type: shippingAddressSchema, required: true },
@@ -85,6 +122,7 @@ const orderSchema = new mongoose.Schema(
       default: "pending",
       required: true,
     },
+    paymentDetails: { type: paymentDetailsSchema, default: undefined },
     orderStatus: {
       type: String,
       enum: ["processing", "shipped", "delivered", "cancelled"],
@@ -102,6 +140,15 @@ const orderSchema = new mongoose.Schema(
     notes: { type: String, trim: true, default: "" },
   },
   { timestamps: true }
+);
+
+orderSchema.index(
+  { "paymentDetails.transactionUuid": 1 },
+  { unique: true, sparse: true }
+);
+orderSchema.index(
+  { "paymentDetails.attempts.transactionUuid": 1 },
+  { unique: true, sparse: true }
 );
 
 export default mongoose.model("Order", orderSchema);

@@ -49,3 +49,9 @@ export const uploadAvatar = multer({
 
 export const uploadProductImages = createImageUploader("JewelLens/products");
 export const uploadTryOnImage = createImageUploader("JewelLens/tryon/user-uploads");
+export const uploadHeroSliderImage = createImageUploader("JewelLens/hero-sliders", [
+  { width: 1920, height: 900, crop: "limit", quality: "auto", fetch_format: "auto" },
+]);
+export const uploadAboutImages = createImageUploader("JewelLens/about", [
+  { width: 1920, height: 1200, crop: "limit", quality: "auto", fetch_format: "auto" },
+]);
