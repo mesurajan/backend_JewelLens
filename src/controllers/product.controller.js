@@ -37,16 +37,17 @@ const normalizeProductPayload = (body, files = []) => {
   const uploadedImages = files.map((file) => file.path).filter(Boolean);
   const existingImages = parseJsonField(body.images, Array.isArray(body.images) ? body.images : []);
   const images = [...existingImages, ...uploadedImages].filter(Boolean);
+  const stockCount = parseNumberField(body.stockCount);
 
   return {
     ...body,
     price: parseNumberField(body.price),
     originalPrice: parseNumberField(body.originalPrice),
-    stockCount: parseNumberField(body.stockCount),
+    stockCount,
     rating: parseNumberField(body.rating),
     reviews: parseNumberField(body.reviews),
     estimatedDeliveryDays: parseNumberField(body.estimatedDeliveryDays),
-    inStock: parseBooleanField(body.inStock),
+    inStock: stockCount === undefined ? parseBooleanField(body.inStock) : stockCount > 0,
     featured: parseBooleanField(body.featured),
     freeShipping: parseBooleanField(body.freeShipping),
     codAvailable: parseBooleanField(body.codAvailable),
